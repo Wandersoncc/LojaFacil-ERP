@@ -1,0 +1,263 @@
+// LojaFácil ERP — Prisma schema
+// Corresponde ao doc docs/03-Modelagem-Dados.md. Multi-tenant por tenantId.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  OWNER
+  STAFF
+}
+
+enum Platform {
+  MELI
+  SHOPEE
+  TIKTOK
+  SHEIN
+}
+
+enum StoreSyncStatus {
+  ok
+  syncing
+  error
+  disconnected
+}
+
+enum SubStatus {
+  active
+  past_due
+  canceled
+  trialing
+}
+
+enum ListingStatus {
+  active
+  paused
+  closed
+  sync_error
+}
+
+enum OrderStatus {
+  pending
+  paid
+  ready_to_ship
+  shipped
+  delivered
+  canceled
+}
+
+enum MovementType {
+  inbound
+  outbound
+  reserve
+  release
+  adjust
+}
+
+model Tenant {
+  id            String         @id @default(uuid())
+  name          String
+  createdAt     DateTime       @default(now())
+  users         User[]
+  stores        Store[]
+  products      Product[]
+  listings      Listing[]
+  orders        Order[]
+  movements     StockMovement[]
+  messages      Message[]
+  subscription  Subscription?
+  syncLogs      SyncLog[]
+}
+
+model User {
+  id           String   @id @default(uuid())
+  tenantId     String
+  tenant       Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  email        String   @unique
+  passwordHash String
+  name         String?
+  role         UserRole @default(OWNER)
+  permissions  Json     @default("{}")
+  createdAt    DateTime @default(now())
+
+  @@index([tenantId])
+}
+
+model Plan {
+  id           String         @id // 'free' | 'basic' | 'pro'
+  name         String
+  maxStores    Int
+  maxOrdersMo  Int
+  maxSkus      Int
+  maxUsers     Int
+  priceCents   Int            @default(0)
+  subscriptions Subscription[]
+}
+
+model Subscription {
+  id        String    @id @default(uuid())
+  tenantId  String    @unique
+  tenant    Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  planId    String
+  plan      Plan      @relation(fields: [planId], references: [id])
+  status    SubStatus @default(trialing)
+  renewsAt  DateTime?
+  createdAt DateTime  @default(now())
+}
+
+model Store {
+  id               String          @id @default(uuid())
+  tenantId         String
+  tenant           Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  platform         Platform
+  nickname         String
+  externalSellerId String?
+  accessTokenEnc   Bytes?          // AES-256-GCM
+  refreshTokenEnc  Bytes?
+  tokenExpiresAt   DateTime?
+  syncStatus       StoreSyncStatus @default(syncing)
+  lastSyncedAt     DateTime?
+  createdAt        DateTime        @default(now())
+  listings         Listing[]
+  orders           Order[]
+  messages         Message[]
+  syncLogs         SyncLog[]
+
+  @@unique([tenantId, platform, externalSellerId])
+  @@index([tenantId])
+}
+
+model Product {
+  id                 String          @id @default(uuid())
+  tenantId           String
+  tenant             Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  sku                String
+  title              String
+  costCents          Int             @default(0)
+  stockAvailable     Int             @default(0)
+  stockReserved      Int             @default(0)
+  lowStockThreshold  Int             @default(0)
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+  listings           Listing[]
+  movements          StockMovement[]
+  orderItems         OrderItem[]
+
+  @@unique([tenantId, sku])
+  @@index([tenantId])
+}
+
+model Listing {
+  id            String        @id @default(uuid())
+  tenantId      String
+  tenant        Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  storeId       String
+  store         Store         @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  productId     String
+  product       Product       @relation(fields: [productId], references: [id], onDelete: Cascade)
+  externalId    String?
+  priceCents    Int
+  status        ListingStatus @default(active)
+  lastSyncError String?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  @@unique([storeId, externalId])
+  @@index([tenantId])
+  @@index([productId])
+}
+
+model Order {
+  id               String      @id @default(uuid())
+  tenantId         String
+  tenant           Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  storeId          String
+  store            Store       @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  externalId       String
+  status           OrderStatus
+  totalCents       Int
+  platformFeeCents Int         @default(0)
+  buyerName        String?
+  shippingJson     Json?
+  trackingCode     String?
+  nfeStatus        String?
+  nfeKey           String?
+  placedAt         DateTime
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+  items            OrderItem[]
+  movements        StockMovement[]
+
+  @@unique([storeId, externalId])
+  @@index([tenantId, placedAt])
+  @@index([tenantId, status])
+}
+
+model OrderItem {
+  id             String   @id @default(uuid())
+  tenantId       String
+  orderId        String
+  order          Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId      String?
+  product        Product? @relation(fields: [productId], references: [id])
+  sku            String?
+  title          String
+  qty            Int
+  unitPriceCents Int
+
+  @@index([orderId])
+}
+
+model StockMovement {
+  id        String       @id @default(uuid())
+  tenantId  String
+  tenant    Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  productId String
+  product   Product      @relation(fields: [productId], references: [id], onDelete: Cascade)
+  type      MovementType
+  qty       Int
+  reason    String?
+  orderId   String?
+  order     Order?       @relation(fields: [orderId], references: [id])
+  createdBy String?
+  createdAt DateTime     @default(now())
+
+  @@index([tenantId, productId, createdAt])
+}
+
+model Message {
+  id               String   @id @default(uuid())
+  tenantId         String
+  tenant           Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  storeId          String
+  store            Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  externalThreadId String
+  buyerName        String?
+  body             String
+  direction        String   // 'in' | 'out'
+  answered         Boolean  @default(false)
+  receivedAt       DateTime
+  createdAt        DateTime @default(now())
+
+  @@index([tenantId, answered, receivedAt])
+}
+
+model SyncLog {
+  id        String   @id @default(uuid())
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  storeId   String?
+  store     Store?   @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  job       String
+  status    String   // 'ok' | 'error'
+  detail    String?
+  createdAt DateTime @default(now())
+
+  @@index([tenantId, createdAt])
+}
