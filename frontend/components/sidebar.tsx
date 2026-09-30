@@ -14,10 +14,10 @@ import { cn } from "@/lib/utils";
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/products", label: "Produtos", icon: Package },
-  { href: "/orders", label: "Pedidos", icon: ShoppingCart },
-  { href: "/stores", label: "Lojas", icon: Store },
-  { href: "/settings", label: "Configurações", icon: Settings },
+  { href: "/dashboard/products", label: "Produtos", icon: Package },
+  { href: "/dashboard/orders", label: "Pedidos", icon: ShoppingCart },
+  { href: "/dashboard/stores", label: "Lojas", icon: Store },
+  { href: "/dashboard/settings", label: "Configurações", icon: Settings },
 ];
 
 export function Sidebar({
@@ -60,7 +60,10 @@ export function Sidebar({
         <nav className="space-y-1 p-4">
           {navItems.map((item) => {
             const active =
-              pathname === item.href || pathname.startsWith(item.href + "/");
+              item.href === "/dashboard"
+                ? pathname === "/dashboard"
+                : pathname === item.href ||
+                  pathname.startsWith(item.href + "/");
             const Icon = item.icon;
             return (
               <Link
